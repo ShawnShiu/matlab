@@ -1,58 +1,54 @@
 %%
-close all; clear all; clc;
+clc; close all; clear all;
 %%
-%%  Parameter                         
-numBits = 500;                       % number of symbol
-multiple = 8;                       % sampling rate
+%% parameter
+numbit = 500;
+multiple = 8;
 
-%% QPSK
-qpskModulator = comm.QPSKModulator('BitInput',true);
-data = randi([0 1],numBits*2,1);
-txSig = qpskModulator(data);
-qpsk_t = txSig;
+%% QPSK modulation
+qpsk_m = comm.QPSKModulator('BitInput',true);
+data = randi([0 1],numbit*2,1);
+txSig = qpsk_m(data);
 
-%% Add CFO
-pfo = comm.PhaseFrequencyOffset('PhaseOffset',1, ...
-                                'FrequencyOffset',1e1, ...
-                                'SampleRate',1e9);
-txSig = pfo(txSig);
-
-%% srrc+up
-txfilter = comm.RaisedCosineTransmitFilter('Gain',1.5,...
-                                           'OutputSamplesPerSymbol',multiple);
+%% SRRC + Upsample
+txfilter = comm.RaisedCosineTransmitFilter('Gain',1.5,'OutputSamplesPerSymbol',multiple);
 txSig = txfilter(txSig);
 
-%% STO
-varDelay = dsp.VariableFractionalDelay;
-vdelay = ((0:1/(numBits*multiple):1-1/(numBits*multiple))');   
-txSig = varDelay(txSig,vdelay);
+%% CFO
+cfo = comm.PhaseFrequencyOffset('FrequencyOffset',1e1,'PhaseOffset',10,'SampleRate',1e9);
+txSig = cfo(txSig);
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%% channel
-channel = comm.AWGNChannel('EbNo',15);
-txSig = channel(txSig);
-%%%%%%%%%%%%%%%%%%%%%%%%%%% 
-%% rx srrc
-rxfilter = comm.RaisedCosineReceiveFilter('Gain',1.5,...
-                                          'InputSamplesPerSymbol',multiple, ...
-                                          'DecimationFactor',multiple/2);
+%% STO
+sto = dsp.VariableFractionalDelay;
+delay = (0:1/((numbit*multiple)):1-1/((numbit*multiple)))';
+txSig = sto(txSig,delay);
+
+%% channel
+ch = comm.AWGNChannel('EbNo',20);
+txSig = ch(txSig);
+
+%% SRRC
+rxfilter = comm.RaisedCosineReceiveFilter("InputSamplesPerSymbol",1,"DecimationFactor",1);
 rxSig = rxfilter(txSig);
+
+%% TR
+symbolSync = comm.SymbolSynchronizer('TimingErrorDetector','Zero-Crossing (decision-directed)',...
+                                     'SamplesPerSymbol',multiple, ...
+                                     'NormalizedLoopBandwidth',0.035);
+rxSig_tr = symbolSync(rxSig);
 
 %% CR
 carrierSync = comm.CarrierSynchronizer( 'NormalizedLoopBandwidth',0.005,...
                                         'SamplesPerSymbol',1, ...
                                         'Modulation','QPSK');
-rxSig_cr = carrierSync(rxSig);
-
-%% TR
-symbolSync = comm.SymbolSynchronizer('TimingErrorDetector','Zero-Crossing (decision-directed)',...
-                                     'SamplesPerSymbol',2, ...
-                                     'NormalizedLoopBandwidth',0.035);
-rxSig = symbolSync(rxSig_cr);
+rxSig_cr = carrierSync(rxSig_tr);
 
 %% plot
-figure (1);
-subplot(1, 2, 1);
-plot(real(rxSig_cr), imag(rxSig_cr), 'o'); title('cr');  grid on;
-subplot(1, 2, 2);
-plot(real(rxSig), imag(rxSig), 'o'); title('tr');  grid on;
-scatterplot(rxSig);
+figure(1);
+subplot(1,3,1);
+plot(real(rxSig),imag(rxSig),'.'); grid on; title('rx');
+subplot(1,3,2);
+plot(real(rxSig_tr),imag(rxSig_tr),'.'); grid on; title('tr');
+subplot(1,3,3);
+plot(real(rxSig_cr),imag(rxSig_cr),'.'); grid on; title('cr');
+scatterplot(rxSig_cr);
